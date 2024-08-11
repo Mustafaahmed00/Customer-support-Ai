@@ -1,7 +1,39 @@
+// Import necessary modules
 import { NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
+import dotenv from 'dotenv';
 
-const systemPrompt = `You are an AI assistant for Headstarter AI, a company dedicated to helping individuals improve their skills through various resources and activities. Your goal is to provide helpful and accurate information to users about Headstarter AI's services, which include:
+dotenv.config();
+
+const MODEL_NAME = "gemini-pro";
+const API_KEY = process.env.API_KEY;
+
+// Function to interact with Google Gemini AI
+async function runChat(userInput) {
+  const genAI = new GoogleGenerativeAI(API_KEY);
+  const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+
+  const generationConfig = {
+    temperature: 0.9,
+    topK: 1,
+    topP: 1,
+    maxOutputTokens: 1000,
+  };
+
+  const safetySettings = [
+    {
+      category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+      threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+    },
+  ];
+
+  const chat = model.startChat({
+    generationConfig,
+    safetySettings,
+    history: [
+      {
+        role: "user",
+        parts: [{ text: `You are an AI assistant for Headstarter AI, a company dedicated to helping individuals improve their skills through various resources and activities. Your goal is to provide helpful and accurate information to users about Headstarter AI's services, which include:
 
 1. **Technical Interviews**: Simulated technical interviews with AI-generated interviewers to help users practice and improve their interviewing skills.
 
@@ -27,37 +59,40 @@ Here are some example responses:
 
 5. **Career Development**: "We offer resources to support your career development, including resume writing tips, job search strategies, and networking opportunities. Our career section provides detailed guides and advice to help you succeed in your professional journey."
 
-Always aim to be helpful and encouraging, ensuring users feel supported in their learning and career development efforts with Headstarter AI.
-`;
+Always aim to be helpful and encouraging, ensuring users feel supported in their learning and career development efforts with Headstarter AI.`}],
+      },
+      {
+        role: "model",
+        parts: [{ text: "Hello! Welcome to Headstarter AI CHATBOT. What's your name?"}],
+      },
+      {
+        role: "user",
+        parts: [{ text: "Hi"}],
+      },
+      {
+        role: "model",
+        parts: [{ text: "Hi there! Thanks for reaching out to Headstarter AI CHATBOT..." }],
+      },
+    ],
+  });
 
+  const result = await chat.sendMessage(userInput);
+  const response = result.response;
+  return response.text();
+}
+
+// Handle POST requests to the /chat endpoint
 export async function POST(req) {
-  const openai = new OpenAI();
-  const data = await req.json();
+  try {
+    const { userInput } = await req.json();
+    if (!userInput) {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
 
-  const completion = await openai.chat.completions.create({
-    messages: [{ role: 'system', content: systemPrompt }, ...data],
-    model: 'gpt-3.5-turbo',
-    stream: true,
-  });
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      try {
-        for await (const chunk of completion) {
-          const content = chunk.choices[0]?.delta?.content;
-          if (content) {
-            const text = encoder.encode(content);
-            controller.enqueue(text);
-          }
-        }
-      } catch (err) {
-        controller.error(err);
-      } finally {
-        controller.close();
-      }
-    },
-  });
-
-  return new NextResponse(stream);
+    const response = await runChat(userInput);
+    return NextResponse.json({ response });
+  } catch (error) {
+    console.error('Error in chat endpoint:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
 }
